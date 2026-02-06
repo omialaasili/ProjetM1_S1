@@ -5,4 +5,4 @@ ristiques : c’est un problème de régression. On dispose de train.csv (avec p
 méthodes de data science vues en cours, dans un contexte proche du monde professionnel
 de l’immobilier.
 
-Le challege est disponible sur le lien suivant https://www.kaggle.com/competitions/house-prices-advanced-regression-techniques/submissions .
+Le challege est disponible sur le lien suivant https://www.kaggle.com/competitions/house-prices-advanced-regression-techniques .
