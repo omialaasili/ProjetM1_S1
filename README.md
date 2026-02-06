@@ -1,7 +1,7 @@
 Ce travail utilise le challenge Kaggle House Prices sur des données immobilières d’Ames
 (Iowa). L’objectif est de prédire le prix de vente des logements à partir de leur caracté
 ristiques : c’est un problème de régression. On dispose de train.csv (avec prix) et test.csv
-(sans prix) pour faire une soumission au format Kaggle. Le projet met en pratique des
+(sans prix) pour faire une soumission au format Kaggle. On dispose aussi du fichier data_decription.txt qui décrit toutes les varaiables dans les fichiers CSV ainsi que d'un exemple de soumission. Le projet met en pratique des
 méthodes de data science vues en cours, dans un contexte proche du monde professionnel
 de l’immobilier.
 
