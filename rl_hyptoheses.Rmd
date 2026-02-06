@@ -1,0 +1,309 @@
+-   Import du csv
+
+    ```{r}
+    data <- read.csv("CSV_apres_traitement/train_nettoye.csv", stringsAsFactors = FALSE)
+
+    dim(data)
+    head(names(data), 15)
+    tail(names(data), 15)
+    getwd()
+    ```
+
+-   Suppression des variables inutiles (On peut enlever la colonne SalaPrice car on continue de faire la prédiction sur le log du prix, colonne qui est déjà présente dans le csv), et variable qualitatives en facteurs
+
+    ```{r}
+    data$Id <- NULL
+    data$SalePrice <- NULL
+
+    ```
+
+    ```{r}
+    data[] <- lapply(data, function(x) {
+      if (is.character(x)) as.factor(x) else x
+    })
+    ```
+
+-   Séparation train / validation
+
+```{r}
+set.seed(123)
+
+n <- nrow(data)
+idx <- sample(1:n, size = 0.8 * n)
+
+train_data <- data[idx, ]
+test_data  <- data[-idx, ]
+
+```
+
+```{r}
+
+names(train_data)
+#on vérifie qu'il n'y a plus la colonne SalePrice et qu' on a bien la colonne "SalePrice_log" qu'on va essayer de prédire le mieux possible
+```
+
+```{r}
+#bloc pour éviter que le modèle voie des catégories qu’il n’a jamais apprises, sinon il y un erreur pour la prédiction
+facteurs <- names(train_data)[sapply(train_data, is.factor)]
+
+for (v in facteurs) {
+  test_data[[v]] <- factor(test_data[[v]], levels = levels(train_data[[v]]))
+}
+
+#Alignement sur le niveaux du modèle aic car il y avait des erreurs sinon
+for (v in names(stepmodel_AIC$xlevels)) {
+  test_data[[v]] <- factor(
+    test_data[[v]],
+    levels = stepmodel_AIC$xlevels[[v]]
+  )
+}
+```
+
+-   Regression linéaire avec toutes les varaiables sans séléction
+
+```{r}
+reg <- lm(SalePrice_log ~ ., data = train_data)
+summary(reg)
+length(attr(terms(reg), "term.labels"))
+
+```
+
+J’ai d’abord estimé une régression linéaire multiple sur log(SalePrice) en utilisant toutes les variables explicatives du train. Le modèle obtient un R² ajusté très élevé (0,9281), ce qui montre qu’il explique très bien les données. Mais de nombreux coefficients ont des p-values élevées, comme FireplaceQuFa qui a une p-value d'environ 0.7928, ce qui montre que le modèle est trop complexe (79 régresseurs).
+
+-   AIC
+
+```{r}
+stepmodel_AIC <- step(reg, direction = "backward")
+```
+
+```{r}
+summary(stepmodel_AIC)
+length(attr(terms(stepmodel_AIC), "term.labels"))
+```
+
+J’ai ensuite appliqué une sélection backward avec commes critère l'AIC (par défaut) car on a beaucoup de variables. Le meilleur modèle correspondant contient 51 variables mais , conserve un R² ajusté légèrement plus élevé (0.9287) que le modème complet, ce qui montre qu’il explique toujours très bien les données du train avec un modèle plus simple.
+
+```{r}
+# Prédiction
+pred_test_aic <- predict(stepmodel_AIC, newdata = test_data)
+
+# Garder uniquement les observations valides
+valid <- !is.na(pred_test_aic) & !is.na(test_data$SalePrice_log)
+
+y_test <- test_data$SalePrice_log[valid]
+y_pred <- pred_test_aic[valid]
+
+# R² sur le test
+SSE_aic <- sum((y_test - y_pred)^2)
+SST_aic <- sum((y_test - mean(y_test))^2)
+
+R2_test_aic <- 1 - SSE_aic / SST_aic
+R2_test_aic
+
+```
+
+```{r}
+#on regarde combien d'individus ont vraiment été utilisés pour le train et le test
+n_util <- sum(valid)
+n_total_test <- nrow(test_data)
+
+n_util_aic <- sum(!is.na(pred_test_aic) & !is.na(test_data$SalePrice_log))
+
+```
+
+Après la sélection du meilleur modèle par AIC, j’évalue ses performances sur l’échantillon de test en prédisant toujours la variable log(SalePrice). Mais certains individus du jeu de test me posaient problème car ils possèdent des modalités de variables qualitatives qui n'étaient pas présentes dans le jeu d’entraînement, alors que ces variables ont été gardées pour le modèle.
+
+Donc pour pouvoir faire la prédiction, j'ai préféré supprimer ces individus, qui représente un faible partie. J'ai calculé les SSE et SST pour obtenir le R² sur le jeu de test. Pour vérifier que j'ai assez d'individus pour la prédiction, j'utilise les variables n_util_aic et n_total_test et on voit que j'ai respectivement 289 et 292 donc, je n'ai pas perdu trop d'individus et l'évaluation du modèle par AIC reste assez fiable.
+
+Pour finir, le modèle s'ajuste très bien aux nouvelles données du test, en effet, le coefficient de détermination obtenu sur l’échantillon de test est de 0.9221974, ce qui signifie que le modèle arrive à capter plus de 92% de la variance.
+
+-   BIC
+
+```{r}
+stepmodel_bic <- step(reg, direction = "backward", k=log(nrow(train_data)))  
+
+```
+
+```{r}
+summary(stepmodel_bic)
+length(attr(terms(stepmodel_bic), "term.labels"))
+```
+
+J’ai aussi appliqué une sélection backward avec comme critère le BIC cette fois-ci, plus pénalisant que l’AIC. Le modèle retenu contient seulement 24 variables et obtient un R² ajusté sur le train de 0.9066, ce qui est très bien aussi. On remarque donc que la baisse du R² par rapport au modèle AIC est très faible malgré que le nombre de variables ait baissé de presque la moitié, ce qui montre que l’AIC supprime beaucoup de variables peu significatives mais conserve un modèle qui explique bien les données.
+
+```{r}
+# Prédiction
+pred_test_bic <- predict(stepmodel_bic, newdata = test_data)
+
+# Garder uniquement les observations valides
+valid <- !is.na(pred_test_bic) & !is.na(test_data$SalePrice_log)
+
+y_test <- test_data$SalePrice_log[valid]
+y_pred <- pred_test_bic[valid]
+
+# R² sur le test
+SSE_bic <- sum((y_test - y_pred)^2)
+SST_bic <- sum((y_test - mean(y_test))^2)
+
+R2_test_bic <- 1 - SSE_bic / SST_bic
+R2_test_bic
+```
+
+```{r}
+#on regarde combien d'individus ont vraiment été utilisés pour le train et le test
+n_util_bic <- sum(!is.na(pred_test_bic) & !is.na(test_data$SalePrice_log))
+
+```
+
+Je suis ensuite le même schéma pour le modèle retenu par le critère BIC. Là aussi, très peu d’observations sont exclues, avec 290 individus finalement utilisés pour la prédiction sur 292 dans le jeu de test. Le R² obtenu sur le jeu de test est de 0.9293, ce qui montre que le modèle BIC explique plus de 92 % de la variance des données aussi, mais en s’appuyant sur environ deux fois moins de variables que le modèle AIC (24 contre 51).
+
+-   Comparaison
+
+```{r}
+summary(stepmodel_AIC)$adj.r.squared
+summary(stepmodel_bic)$adj.r.squared
+length(attr(terms(stepmodel_AIC), "term.labels"))
+length(attr(terms(stepmodel_bic), "term.labels"))
+
+```
+
+```{r}
+cat(
+  "MODELE AIC \n",
+  "- Nombre de variables :", length(attr(terms(stepmodel_AIC), "term.labels")), "\n",
+  "- R² ajusté (train) :", summary(stepmodel_AIC)$adj.r.squared, "\n",
+  "- SSE (test) :", SSE_aic, "\n",
+  "- SST (test) :", SST_aic, "\n",
+  "- R² (test) :", R2_test_aic, "\n",
+  "- Observations utilisées (test) :", n_util_aic, "/", n_total_test, "\n\n",
+
+  "MODELE BIC \n",
+  "- Nombre de variables :", length(attr(terms(stepmodel_bic), "term.labels")), "\n",
+  "- R² ajusté (train) :", summary(stepmodel_bic)$adj.r.squared, "\n",
+  "- SSE (test) :", SSE_bic, "\n",
+  "- SST (test) :", SST_bic, "\n",
+  "- R² (test) :", R2_test_bic, "\n",
+  "- Observations utilisées (test) :", n_util_bic, "/", n_total_test, "\n"
+)
+
+```
+
+En comparant les deux modèles, on remarque que le modèle BIC obtient un R² ajusté très légérement plus élevé sur le test que le modèle AIC, alors que le modèle AIC avait un meilleur R² ajusté sur le train. Cela montre que le fait d’ajouter beaucoup de variables dans le modèle AIC, non seulement n’améliore pas les performances mais peut même les dégrader (sur le jeu de test), ce qui laisse aussi penser que le modele AIC fais peut être un peu de surajustement en gardant autant de variables.
+
+```{r}
+attr(terms(stepmodel_bic), "term.labels")
+
+```
+
+-   Vérification des hypotheses
+
+```{r}
+bestmodel <- stepmodel_bic
+```
+
+1.  Linéarité
+
+```{r}
+plot(bestmodel$fitted.values, bestmodel$residuals)
+```
+
+2.  Homoscédasticité
+
+```{r}
+plot(bestmodel$residuals)
+```
+
+3.  Normalité
+
+```{r}
+qqnorm(bestmodel$residuals)
+qqline(bestmodel$residuals)
+```
+
+-   Outliers
+
+```{r}
+library(car)
+outlierTest(stepmodel_bic) 
+
+
+```
+
+-   Soumission bic avec prediction à partir du train complet
+
+```{r}
+test_kaggle <- read.csv("CSV_apres_traitement/test.csv", stringsAsFactors = FALSE)
+
+```
+
+```{r}
+# Supprimer Id
+Id <- test_kaggle$Id
+test_kaggle$Id <- NULL
+
+#transformer les variables qualitatives en facteurs
+test_kaggle[] <- lapply(test_kaggle, function(x) {
+  if (is.character(x)) as.factor(x) else x
+})
+
+```
+
+```{r}
+facteurs <- names(train_data)[sapply(train_data, is.factor)]
+
+for (v in facteurs) {
+  test_kaggle[[v]] <- factor(test_kaggle[[v]],
+                             levels = levels(train_data[[v]]))
+}
+
+```
+
+```{r}
+reg_kaggle <- lm(SalePrice_log ~ ., data = data)
+summary(reg_kaggle)
+length(attr(terms(reg_kaggle), "term.labels"))
+
+```
+
+```{r}
+stepmodel_bic_kaggle <- step(reg_kaggle, direction = "backward", k=log(nrow(data)))
+```
+
+```{r}
+pred_kaggle <- predict(stepmodel_bic_kaggle, newdata = test_kaggle)
+
+```
+
+```{r}
+sum(is.na(pred_kaggle))  
+```
+
+```{r}
+pred_kaggle<- exp(pred_kaggle)
+
+```
+
+```{r}
+soumission <- data.frame(
+  Id = Id,
+  SalePrice = pred_kaggle
+)
+```
+
+```{r}
+length(Id)
+length(pred_kaggle)
+
+```
+
+```{r}
+write.csv(
+  soumission,
+  file = "soumission_r_bic_trainComplet.csv",
+  row.names = FALSE
+)
+```
+
+```{r}
+
+```
